@@ -54,6 +54,8 @@ pip install -r requirements.txt
 # Start the backend server
 python app.py
 
+-------------------------------------------------------------------------------
+
 ## Learn more
 
 To learn more about developing your project with Expo, look at the following resources:
