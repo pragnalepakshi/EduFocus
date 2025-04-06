@@ -35,6 +35,25 @@ npm run reset-project
 
 This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
+## 🖥️ Backend Setup
+
+Follow the steps below to set up and run the backend server:
+
+```bash
+cd backend
+python -m venv venv
+# Activate virtual environment
+# On Windows:
+.\venv\Scripts\activate
+# On macOS/Linux:
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the backend server
+python app.py
+
 ## Learn more
 
 To learn more about developing your project with Expo, look at the following resources:
