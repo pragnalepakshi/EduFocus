@@ -3,6 +3,9 @@
 # dependencies
 node_modules/
 
+# Python venv
+venv/
+
 # Expo
 .expo/
 dist/
@@ -35,4 +38,11 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Ignore uploaded files
+uploads/
+
+# Ignore generated output
+output/
+
+# App example
 app-example

@@ -1,4 +1,13 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Alert,
+  ScrollView,
+  ActivityIndicator,
+  Platform,
+} from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
@@ -6,6 +15,8 @@ import { useState } from 'react';
 export default function PredictScreen() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<any>(null);
+  const [inattentivePeriods, setInattentivePeriods] = useState<[number, number][]>([]);
+  const [loading, setLoading] = useState(false);
 
   const pickDocument = async () => {
     let result = await DocumentPicker.getDocumentAsync({
@@ -14,20 +25,84 @@ export default function PredictScreen() {
 
     if (!result.canceled && result.assets?.length > 0) {
       setSelectedFile(result);
+      setInattentivePeriods([]); // clear old results
     }
   };
 
-  const handleAnalyze = () => {
-    if (selectedFile) {
-      console.log('Uploading file:', selectedFile.assets[0].uri);
-      Alert.alert('File Ready', `Selected file: ${selectedFile.assets[0].name}`);
-    } else {
+  const handleAnalyze = async () => {
+    if (!selectedFile) {
       Alert.alert('No File', 'Please select a file to analyze.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const fileAsset = selectedFile.assets[0];
+      const filename = fileAsset.name;
+
+      const formData = new FormData();
+
+      if (Platform.OS === 'web') {
+        // 🧠 Web: Fetch file as blob first
+        const fileResponse = await fetch(fileAsset.uri);
+        const blob = await fileResponse.blob();
+
+        const file = new File([blob], filename, { type: 'text/csv' });
+        formData.append('file', file);
+      } else {
+        // 📱 Mobile: Use URI directly
+        formData.append('file', {
+          uri: fileAsset.uri,
+          name: filename,
+          type: 'text/csv',
+        } as any);
+      }
+
+      // 1️⃣ Upload to /predict
+      const uploadResponse = await fetch('http://192.168.1.4:8085/predict', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        throw new Error('Failed to upload file.');
+      }
+
+      // 2️⃣ Process the uploaded file
+      const processResponse = await fetch('http://192.168.1.4:8085/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ filename }),
+      });
+
+      if (!processResponse.ok) {
+        throw new Error('Failed to process file.');
+      }
+
+      const data = await processResponse.json();
+      const periods = data.inattentive_periods || [];
+
+      const parsed = periods.map((text: string) => {
+        const match = text.match(/From ([\d.]+) sec to ([\d.]+) sec/);
+        if (match) {
+          return [parseFloat(match[1]), parseFloat(match[2])] as [number, number];
+        }
+        return null;
+      }).filter(Boolean) as [number, number][];
+
+      setInattentivePeriods(parsed);
+    } catch (error) {
+      console.error(error);
+      Alert.alert('Error', 'Something went wrong during processing.');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.headerContainer}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>&larr;</Text>
@@ -48,20 +123,38 @@ export default function PredictScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.analyzeButton, !selectedFile && styles.disabledButton]}
-          disabled={!selectedFile}
+          style={[styles.analyzeButton, (!selectedFile || loading) && styles.disabledButton]}
+          disabled={!selectedFile || loading}
           onPress={handleAnalyze}
         >
-          <Text style={styles.analyzeButtonText}>Analyze Attention</Text>
+          <Text style={styles.analyzeButtonText}>
+            {loading ? 'Analyzing...' : 'Analyze Attention'}
+          </Text>
         </TouchableOpacity>
+
+        {loading && <ActivityIndicator size="large" color="#3366FF" style={{ marginTop: 20 }} />}
+
+        {inattentivePeriods.length > 0 && (
+          <View style={styles.resultsContainer}>
+            <Text style={styles.resultsTitle}>🔴 Periods of Inattention (≥ 10 seconds)</Text>
+            {inattentivePeriods.map((period, index) => {
+              const [start, end] = period;
+              return (
+                <Text key={index} style={styles.resultText}>
+                  ⏳ From {start.toFixed(2)}s to {end.toFixed(2)}s
+                </Text>
+              );
+            })}
+          </View>
+        )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: '#F5F9FF',
     padding: 20,
   },
@@ -132,6 +225,24 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   disabledButton: {
-    backgroundColor: '#A0AEC0',
+    backgroundColor: '#A0BFFF',
+  },
+  resultsContainer: {
+    marginTop: 30,
+    width: '100%',
+    padding: 10,
+    backgroundColor: '#EFF3FF',
+    borderRadius: 10,
+  },
+  resultsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#444',
+    marginBottom: 10,
+  },
+  resultText: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 5,
   },
 });
