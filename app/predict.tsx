@@ -59,7 +59,7 @@ export default function PredictScreen() {
       }
 
       // 1️⃣ Upload to /predict
-      const uploadResponse = await fetch('http://192.168.1.4:8085/predict', {
+      const uploadResponse = await fetch('http://192.168.1.6:8085/predict', {
         method: 'POST',
         body: formData,
       });
@@ -69,7 +69,7 @@ export default function PredictScreen() {
       }
 
       // 2️⃣ Process the uploaded file
-      const processResponse = await fetch('http://192.168.1.4:8085/process', {
+      const processResponse = await fetch('http://192.168.1.6:8085/process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

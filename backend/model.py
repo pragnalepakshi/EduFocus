@@ -1,15 +1,13 @@
-# model.py
-
 import numpy as np
 import pandas as pd
 from tensorflow.keras.models import load_model
 from scipy.signal import butter, filtfilt
 
-# Load model
+# Load the trained Keras model
 model = load_model("attention_model.h5")
 
-# Channels used in Colab
-EEG_CHANNELS = ['Fp1', 'Fp2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4', 'O1', 'O2']
+# EEG channels used (after dropping pkt_num and timestamp)
+EEG_CHANNELS = ['Fp1', 'Fp2', 'F3', 'F4', 'T4', 'O2', 'T3', 'O1']
 
 def bandpass_filter(data, lowcut=1, highcut=50, fs=250, order=4):
     nyquist = 0.5 * fs
@@ -21,51 +19,66 @@ def bandpass_filter(data, lowcut=1, highcut=50, fs=250, order=4):
 def process_eeg_file(filepath):
     df = pd.read_csv(filepath)
 
-    # Only keep EEG channels (match Colab)
-    df = df[[col for col in EEG_CHANNELS if col in df.columns]]
+    # Drop unused columns
+    df = df.drop(columns=['pkt_num', 'timestamp'], errors='ignore')
 
+    # Ensure all required channels are present
+    if not all(ch in df.columns for ch in EEG_CHANNELS):
+        raise ValueError("Missing required EEG channels")
+
+    df = df[EEG_CHANNELS]
+
+    # Apply bandpass filter
     filtered = bandpass_filter(df.values)
 
-    # Segmentation: 500 samples window, 250 stride (Colab)
+    # Segment into non-overlapping windows (500 samples = 2s, stride = 500 = 2s)
     window_size = 500
-    stride = 250
+    stride = 500
     segments = []
 
     for start in range(0, len(filtered) - window_size + 1, stride):
         segment = filtered[start:start + window_size]
+        segments.append(segment)
 
-        # Normalize per segment (Colab style)
-        mean = segment.mean(axis=0)
-        std = segment.std(axis=0)
-        normalized = (segment - mean) / std
-        segments.append(normalized)
+    X_segmented = np.array(segments)  # shape: (num_windows, 500, 8)
 
-    if len(segments) == 0:
-        raise ValueError("EEG data too short for segmentation")
+    # Global normalization (like Colab)
+    mean = np.mean(X_segmented, axis=(0, 1))
+    std = np.std(X_segmented, axis=(0, 1))
+    X_normalized = (X_segmented - mean) / std
 
-    X = np.array(segments)
-
-    # Predict
-    predictions = model.predict(X)
+    # Predict attention
+    predictions = model.predict(X_normalized)
     attention_states = (predictions >= 0.8).astype(int).flatten()
 
-    # Time axis
-    time_axis = np.arange(len(attention_states)) * (stride / 250)
+    # Time axis in seconds (each window = 2s)
+    stride_sec = stride / 250  # = 2.0
+    time_axis = np.arange(len(attention_states)) * stride_sec
 
-    # Find inattentive periods
-    inattentive_periods = []
+    # Detect inattentive periods ≥10s (5 consecutive windows of inattention)
+    inattentive_durations = []
     start = None
+    duration = 0
 
-    for t, state in zip(time_axis, attention_states):
+    for i, state in enumerate(attention_states):
         if state == 0:
             if start is None:
-                start = t
+                start = time_axis[i]
+            duration += stride_sec
         else:
-            if start is not None:
-                inattentive_periods.append([round(start, 2), round(t, 2)])
-                start = None
+            if duration >= 5:
+                inattentive_durations.append((start, start + duration))
+            start = None
+            duration = 0
 
-    if start is not None:
-        inattentive_periods.append([round(start, 2), round(time_axis[-1], 2)])
+    # ✅ Ensure final period is included if data ends with inattention
+    if start is not None and duration >= 5:
+        inattentive_durations.append((start, start + duration))
 
-    return {"inattentive_durations": inattentive_periods}
+    # Format for frontend
+    output = [f"⏳ From {s:.2f} sec to {e:.2f} sec" for s, e in inattentive_durations]
+
+    return {
+        "inattentive_periods": output,
+        "total_periods": len(output)
+    }
