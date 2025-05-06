@@ -7,16 +7,22 @@ import {
   ScrollView,
   ActivityIndicator,
   Platform,
+  Image,
+  Modal,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
+import * as FileSystem from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 
 export default function PredictScreen() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<any>(null);
   const [inattentivePeriods, setInattentivePeriods] = useState<[number, number][]>([]);
+  const [plotImageUrl, setPlotImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [modalVisible, setModalVisible] = useState(false);
 
   const pickDocument = async () => {
     let result = await DocumentPicker.getDocumentAsync({
@@ -25,7 +31,8 @@ export default function PredictScreen() {
 
     if (!result.canceled && result.assets?.length > 0) {
       setSelectedFile(result);
-      setInattentivePeriods([]); // clear old results
+      setInattentivePeriods([]);
+      setPlotImageUrl(null);
     }
   };
 
@@ -43,14 +50,11 @@ export default function PredictScreen() {
       const formData = new FormData();
 
       if (Platform.OS === 'web') {
-        // 🧠 Web: Fetch file as blob first
         const fileResponse = await fetch(fileAsset.uri);
         const blob = await fileResponse.blob();
-
         const file = new File([blob], filename, { type: 'text/csv' });
         formData.append('file', file);
       } else {
-        // 📱 Mobile: Use URI directly
         formData.append('file', {
           uri: fileAsset.uri,
           name: filename,
@@ -58,17 +62,13 @@ export default function PredictScreen() {
         } as any);
       }
 
-      // 1️⃣ Upload to /predict
       const uploadResponse = await fetch('http://192.168.1.6:8085/predict', {
         method: 'POST',
         body: formData,
       });
 
-      if (!uploadResponse.ok) {
-        throw new Error('Failed to upload file.');
-      }
+      if (!uploadResponse.ok) throw new Error('Failed to upload file.');
 
-      // 2️⃣ Process the uploaded file
       const processResponse = await fetch('http://192.168.1.6:8085/process', {
         method: 'POST',
         headers: {
@@ -77,13 +77,11 @@ export default function PredictScreen() {
         body: JSON.stringify({ filename }),
       });
 
-      if (!processResponse.ok) {
-        throw new Error('Failed to process file.');
-      }
+      if (!processResponse.ok) throw new Error('Failed to process file.');
 
       const data = await processResponse.json();
-      const periods = data.inattentive_periods || [];
 
+      const periods = data.inattentive_periods || [];
       const parsed = periods.map((text: string) => {
         const match = text.match(/From ([\d.]+) sec to ([\d.]+) sec/);
         if (match) {
@@ -93,11 +91,55 @@ export default function PredictScreen() {
       }).filter(Boolean) as [number, number][];
 
       setInattentivePeriods(parsed);
+
+      if (data.plot_url) {
+        setPlotImageUrl(data.plot_url);
+      }
     } catch (error) {
       console.error(error);
       Alert.alert('Error', 'Something went wrong during processing.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (plotImageUrl) {
+      if (Platform.OS === 'web') {
+        try {
+          const cleanUrl = plotImageUrl.split('?')[0]; // Remove ?t=... for clean download
+          const link = document.createElement('a');
+          link.href = cleanUrl;
+          link.download = 'attention_graph.png';
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        } catch (error) {
+          console.error('Download error:', error);
+          Alert.alert('Error', 'Failed to download image.');
+        }
+      } else {
+        try {
+          const downloadResumable = FileSystem.createDownloadResumable(
+            plotImageUrl,
+            FileSystem.documentDirectory + 'attention_graph.png'
+          );
+  
+          const downloadResult = await downloadResumable.downloadAsync();
+          if (downloadResult?.uri) {
+            const { status } = await MediaLibrary.requestPermissionsAsync();
+            if (status === 'granted') {
+              await MediaLibrary.saveToLibraryAsync(downloadResult.uri);
+              Alert.alert('Success', 'Image saved to your device.');
+            } else {
+              Alert.alert('Permission denied', 'Please grant storage permission.');
+            }
+          }
+        } catch (error) {
+          console.error(error);
+          Alert.alert('Error', 'Failed to download image.');
+        }
+      }
     }
   };
 
@@ -137,17 +179,46 @@ export default function PredictScreen() {
         {inattentivePeriods.length > 0 && (
           <View style={styles.resultsContainer}>
             <Text style={styles.resultsTitle}>🔴 Periods of Inattention (≥ 10 seconds)</Text>
-            {inattentivePeriods.map((period, index) => {
-              const [start, end] = period;
-              return (
-                <Text key={index} style={styles.resultText}>
-                  ⏳ From {start.toFixed(2)}s to {end.toFixed(2)}s
-                </Text>
-              );
-            })}
+            {inattentivePeriods.map(([start, end], index) => (
+              <Text key={index} style={styles.resultText}>
+                ⏳ From {start.toFixed(2)}s to {end.toFixed(2)}s
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {plotImageUrl && (
+          <View style={{ marginTop: 30, width: '100%' }}>
+            <Text style={styles.resultsTitle}>🖼️ Attention Graph (Image)</Text>
+            <TouchableOpacity onPress={() => setModalVisible(true)}>
+              <Image
+                source={{ uri: plotImageUrl }}
+                style={{ width: '100%', height: 200, resizeMode: 'contain' }}
+              />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.downloadButton}
+              onPress={handleDownload}
+            >
+              <Text style={styles.downloadButtonText}>Download Graph</Text>
+            </TouchableOpacity>
           </View>
         )}
       </View>
+
+      {/* Zoomable image modal for mobile */}
+      {plotImageUrl && (
+        <Modal visible={modalVisible} transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity style={styles.modalCloseArea} onPress={() => setModalVisible(false)} />
+            <Image source={{ uri: plotImageUrl }} style={styles.modalImage} />
+            <TouchableOpacity onPress={() => setModalVisible(false)} style={styles.modalCloseButton}>
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>✖ Close</Text>
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      )}
     </ScrollView>
   );
 }
@@ -244,5 +315,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
     marginBottom: 5,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCloseArea: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  modalImage: {
+    width: '90%',
+    height: '60%',
+    resizeMode: 'contain',
+  },
+  modalCloseButton: {
+    marginTop: 20,
+    backgroundColor: '#3366FF',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+  },
+  downloadButton: {
+    backgroundColor: '#FF6600',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 10,
+    marginTop: 10,
+  },
+  downloadButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });

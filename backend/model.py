@@ -2,11 +2,13 @@ import numpy as np
 import pandas as pd
 from tensorflow.keras.models import load_model
 from scipy.signal import butter, filtfilt
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import os
+import time
 
-# Load the trained Keras model
 model = load_model("attention_model.h5")
-
-# EEG channels used (after dropping pkt_num and timestamp)
 EEG_CHANNELS = ['Fp1', 'Fp2', 'F3', 'F4', 'T4', 'O2', 'T3', 'O1']
 
 def bandpass_filter(data, lowcut=1, highcut=50, fs=250, order=4):
@@ -16,22 +18,29 @@ def bandpass_filter(data, lowcut=1, highcut=50, fs=250, order=4):
     b, a = butter(order, [low, high], btype="band")
     return filtfilt(b, a, data, axis=0)
 
+def save_attention_plot(time_axis, attention_states, filename="output/attention_plot.png"):
+    plt.figure(figsize=(12, 5))
+    plt.plot(time_axis, attention_states, marker='o', linestyle='-', color='b', alpha=0.7)
+    plt.xlabel("Time (seconds)")
+    plt.ylabel("Attention State (1=Attentive, 0=Inattentive)")
+    plt.title("EEG Attention Variation Over Time")
+    plt.yticks([0, 1], labels=["Inattentive", "Attentive"])
+    plt.grid(True)
+    plt.tight_layout()
+    os.makedirs("output", exist_ok=True)
+    plt.savefig(filename)
+    plt.close()
+
 def process_eeg_file(filepath):
     df = pd.read_csv(filepath)
-
-    # Drop unused columns
     df = df.drop(columns=['pkt_num', 'timestamp'], errors='ignore')
 
-    # Ensure all required channels are present
     if not all(ch in df.columns for ch in EEG_CHANNELS):
         raise ValueError("Missing required EEG channels")
 
     df = df[EEG_CHANNELS]
-
-    # Apply bandpass filter
     filtered = bandpass_filter(df.values)
 
-    # Segment into non-overlapping windows (500 samples = 2s, stride = 500 = 2s)
     window_size = 500
     stride = 500
     segments = []
@@ -40,22 +49,17 @@ def process_eeg_file(filepath):
         segment = filtered[start:start + window_size]
         segments.append(segment)
 
-    X_segmented = np.array(segments)  # shape: (num_windows, 500, 8)
+    X_segmented = np.array(segments)
 
-    # Global normalization (like Colab)
     mean = np.mean(X_segmented, axis=(0, 1))
     std = np.std(X_segmented, axis=(0, 1))
     X_normalized = (X_segmented - mean) / std
 
-    # Predict attention
     predictions = model.predict(X_normalized)
     attention_states = (predictions >= 0.8).astype(int).flatten()
-
-    # Time axis in seconds (each window = 2s)
-    stride_sec = stride / 250  # = 2.0
+    stride_sec = stride / 250
     time_axis = np.arange(len(attention_states)) * stride_sec
 
-    # Detect inattentive periods ≥10s (5 consecutive windows of inattention)
     inattentive_durations = []
     start = None
     duration = 0
@@ -71,14 +75,19 @@ def process_eeg_file(filepath):
             start = None
             duration = 0
 
-    # ✅ Ensure final period is included if data ends with inattention
     if start is not None and duration >= 5:
         inattentive_durations.append((start, start + duration))
 
-    # Format for frontend
     output = [f"⏳ From {s:.2f} sec to {e:.2f} sec" for s, e in inattentive_durations]
+    save_attention_plot(time_axis, attention_states)
+
+    # Append timestamp to bust image cache
+    timestamp = int(time.time())
 
     return {
         "inattentive_periods": output,
-        "total_periods": len(output)
+        "total_periods": len(output),
+        "time_axis": time_axis.tolist(),
+        "attention_states": attention_states.tolist(),
+        "plot_url": f"http://192.168.1.6:8085/plot?t={timestamp}"
     }

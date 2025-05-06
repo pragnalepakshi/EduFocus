@@ -1,9 +1,6 @@
-# app.py
-
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
-import pandas as pd
 from model import process_eeg_file
 
 UPLOAD_FOLDER = 'uploads'
@@ -46,6 +43,18 @@ def process():
     except Exception as e:
         print("Processing error:", e)
         return jsonify({'error': str(e)}), 500
+    finally:
+        # ✅ Guaranteed file removal after processing attempt
+        try:
+            if os.path.exists(filepath):
+                os.remove(filepath)
+                print(f"Deleted uploaded file: {filepath}")
+        except Exception as cleanup_err:
+            print(f"Error deleting file {filepath}: {cleanup_err}")
+
+@app.route('/plot')
+def get_plot():
+    return send_file("output/attention_plot.png", mimetype='image/png')
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8085, debug=True)
