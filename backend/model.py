@@ -11,7 +11,7 @@ import time
 model = load_model("attention_model.h5")
 EEG_CHANNELS = ['Fp1', 'Fp2', 'F3', 'F4', 'T4', 'O2', 'T3', 'O1']
 
-def bandpass_filter(data, lowcut=1, highcut=50, fs=250, order=4):
+def bandpass_filter(data, lowcut=1, highcut=40, fs=250, order=4):
     nyquist = 0.5 * fs
     low = lowcut / nyquist
     high = highcut / nyquist
