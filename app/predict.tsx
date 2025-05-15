@@ -188,7 +188,7 @@ export default function PredictScreen() {
 
         {inattentivePeriods.length > 0 && (
           <View style={styles.resultsContainer}>
-            <Text style={styles.resultsTitle}>🔴 Periods of Inattention (≥ 10 seconds)</Text>
+            <Text style={styles.resultsTitle}>🔴 Periods of Inattention (≥ 5 seconds)</Text>
             {inattentivePeriods.map(([start, end], index) => (
               <Text key={index} style={styles.resultText}>
                 ⏳ From {start.toFixed(2)}s to {end.toFixed(2)}s
