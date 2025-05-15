@@ -62,14 +62,14 @@ export default function PredictScreen() {
         } as any);
       }
 
-      const uploadResponse = await fetch('http://192.168.1.6:8085/predict', {
+      const uploadResponse = await fetch('http://192.168.1.4:8085/predict', {
         method: 'POST',
         body: formData,
       });
 
       if (!uploadResponse.ok) throw new Error('Failed to upload file.');
 
-      const processResponse = await fetch('http://192.168.1.6:8085/process', {
+      const processResponse = await fetch('http://192.168.1.4:8085/process', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -107,13 +107,22 @@ export default function PredictScreen() {
     if (plotImageUrl) {
       if (Platform.OS === 'web') {
         try {
-          const cleanUrl = plotImageUrl.split('?')[0]; // Remove ?t=... for clean download
+          // Fetch the image as blob
+          const response = await fetch(plotImageUrl);
+          if (!response.ok) throw new Error('Failed to fetch image for download');
+  
+          const blob = await response.blob();
+          const url = URL.createObjectURL(blob);
+  
           const link = document.createElement('a');
-          link.href = cleanUrl;
+          link.href = url;
           link.download = 'attention_graph.png';
           document.body.appendChild(link);
           link.click();
           document.body.removeChild(link);
+  
+          // Release the object URL after download
+          URL.revokeObjectURL(url);
         } catch (error) {
           console.error('Download error:', error);
           Alert.alert('Error', 'Failed to download image.');
@@ -142,6 +151,7 @@ export default function PredictScreen() {
       }
     }
   };
+  
 
   return (
     <ScrollView contentContainerStyle={styles.container}>

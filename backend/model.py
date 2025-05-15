@@ -89,5 +89,5 @@ def process_eeg_file(filepath):
         "total_periods": len(output),
         "time_axis": time_axis.tolist(),
         "attention_states": attention_states.tolist(),
-        "plot_url": f"http://192.168.1.6:8085/plot?t={timestamp}"
+        "plot_url": f"http://192.168.1.4:8085/plot?t={timestamp}"
     }
