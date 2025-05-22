@@ -54,6 +54,7 @@ pip install -r requirements.txt
 # Start the backend server
 python app.py
 
+Check the link where the flask server is running and modify the url accordingly in Predict.tsx and model.py files.
 -------------------------------------------------------------------------------
 
 ## Learn more
